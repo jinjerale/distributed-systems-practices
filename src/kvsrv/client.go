@@ -5,12 +5,12 @@ import "crypto/rand"
 import "math/big"
 import "log"
 import "time"
-import "fmt"
 
 
 type Clerk struct {
 	server *labrpc.ClientEnd
 	// You will have to modify this struct.
+	prevRequestId int64
 }
 
 func nrand() int64 {
@@ -24,12 +24,10 @@ func MakeClerk(server *labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.server = server
 	// You'll have to add code here.
+	ck.prevRequestId = -1
 	return ck
 }
 
-func GetUniqueId(key string) string {
-	return fmt.Sprintf("%d", time.Now().UnixNano()) + key
-}
 
 // fetch the current value for a key.
 // returns "" if the key does not exist.
@@ -47,12 +45,15 @@ func (ck *Clerk) Get(key string) string {
 	args := GetArgs{Key: key}
 	reply := GetReply{}
 	// generate a unique request id
-	// args.RequestId = GetUniqueId(key)
+	args.RequestId = nrand()
+	args.PrevRequestId = ck.prevRequestId
+	ck.prevRequestId = args.RequestId
+
 	// retry rpc call until success
 	ok := ck.server.Call("KVServer.Get", &args, &reply)
 	for !ok {
-		log.Printf("RPC failed")
-		time.Sleep(1 * time.Second)
+		// log.Printf("RPC failed")
+		time.Sleep(500 * time.Millisecond)
 		ok = ck.server.Call("KVServer.Get", &args, &reply)
 	}
 	return reply.Value
@@ -71,12 +72,16 @@ func (ck *Clerk) PutAppend(key string, value string, op string) string {
 	args := PutAppendArgs{Key: key, Value: value}
 	reply := PutAppendReply{}
 	// generate a unique request id
-	args.RequestId = GetUniqueId(key)
-	// retry rpc call until success
+	args.RequestId = nrand()
+	args.PrevRequestId = ck.prevRequestId
+	if op == "Append" {
+		ck.prevRequestId = args.RequestId
+	}
 
+	// retry rpc call until success
 	ok := ck.server.Call("KVServer."+op, &args, &reply)
 	for !ok {
-		log.Printf("RPC failed")
+		// log.Printf("RPC failed")
 		time.Sleep(1 * time.Second)
 		ok = ck.server.Call("KVServer."+op, &args, &reply)
 	}
