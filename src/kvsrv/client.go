@@ -4,6 +4,8 @@ import "6.5840/labrpc"
 import "crypto/rand"
 import "math/big"
 import "log"
+import "time"
+import "fmt"
 
 
 type Clerk struct {
@@ -25,6 +27,10 @@ func MakeClerk(server *labrpc.ClientEnd) *Clerk {
 	return ck
 }
 
+func GetUniqueId(key string) string {
+	return fmt.Sprintf("%d", time.Now().UnixNano()) + key
+}
+
 // fetch the current value for a key.
 // returns "" if the key does not exist.
 // keeps trying forever in the face of all other errors.
@@ -40,10 +46,14 @@ func (ck *Clerk) Get(key string) string {
 	// You will have to modify this function.
 	args := GetArgs{Key: key}
 	reply := GetReply{}
+	// generate a unique request id
+	// args.RequestId = GetUniqueId(key)
+	// retry rpc call until success
 	ok := ck.server.Call("KVServer.Get", &args, &reply)
-	if !ok {
-		log.Fatalf("RPC failed")
-		return ""
+	for !ok {
+		log.Printf("RPC failed")
+		time.Sleep(1 * time.Second)
+		ok = ck.server.Call("KVServer.Get", &args, &reply)
 	}
 	return reply.Value
 }
@@ -60,10 +70,15 @@ func (ck *Clerk) PutAppend(key string, value string, op string) string {
 	// You will have to modify this function.
 	args := PutAppendArgs{Key: key, Value: value}
 	reply := PutAppendReply{}
+	// generate a unique request id
+	args.RequestId = GetUniqueId(key)
+	// retry rpc call until success
+
 	ok := ck.server.Call("KVServer."+op, &args, &reply)
-	if !ok {
-		log.Fatalf("RPC failed")
-		return ""
+	for !ok {
+		log.Printf("RPC failed")
+		time.Sleep(1 * time.Second)
+		ok = ck.server.Call("KVServer."+op, &args, &reply)
 	}
 	return reply.Value
 }
