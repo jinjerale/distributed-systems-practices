@@ -26,3 +26,9 @@ Test script:
 ```
 bash test-mr.sh
 ```
+
+## Key/Value Server
+```
+cd src/kvsrv
+go test
+```
