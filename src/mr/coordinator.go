@@ -6,7 +6,21 @@ import "os"
 import "net/rpc"
 import "net/http"
 import "sync"
+import "time"
 // import "fmt"
+
+type TaskState int
+
+const (
+   TaskPending TaskState = iota
+   TaskInProgress
+   TaskCompleted
+)
+
+type TaskInfo struct {
+   state TaskState
+   startTime time.Time
+}
 
 type Coordinator struct {
 	// Your definitions here.
@@ -15,35 +29,62 @@ type Coordinator struct {
 	NReduce   int
 	midx       int
 	ridx	   int
-	mapTasks  []bool // tracks completed map tasks
-	redTasks  []bool // tracks completed reduce tasks
+	mapTasks  []TaskInfo // tracks completed map tasks
+	redTasks  []TaskInfo // tracks completed reduce tasks
 	done      bool
 }
 
 // Your code here -- RPC handlers for the worker to call.
+func GetPendingTask(tasks []TaskInfo) int {
+	for i, task := range tasks {
+		if task.state == TaskPending {
+			return i
+		}
+	}
+	return -1
+}
 
+// Retrieve in progress task to pending if it has been running for over 10 seconds
+func ResetTask(tasks []TaskInfo) {
+	for i, task := range tasks {
+		if task.state == TaskInProgress && time.Since(task.startTime) > 10 * time.Second {
+			tasks[i].state = TaskPending
+		}
+	}
+}
 
 // Assign a task to the worker
 func (c *Coordinator) GetTask(args *GetTaskArgs, reply *GetTaskReply) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.midx < len(c.files) {
-		reply.TaskNum = c.midx
-		reply.NReduce = c.NReduce
-		reply.Filename = c.files[c.midx]
-		reply.TaskType = MapTask
-		c.mapTasks[c.midx] = false // task assigned but not completed
-		c.midx++
-	} else if !c.allMapTasksDone() {
-		reply.TaskType = WaitTask
-		reply.TaskNum = -1 // signal worker to wait
-	} else if !c.allReduceTasksDone() && c.ridx < c.NReduce {
-		reply.TaskType = ReduceTask
-		reply.TaskNum = c.ridx
-		reply.NReduce = c.NReduce
-		c.redTasks[c.ridx] = false
-		c.ridx++
+	if !c.allMapTasksDone() {
+		ResetTask(c.mapTasks)
+		idx := GetPendingTask(c.mapTasks)
+		if idx != -1 {
+			reply.TaskNum = idx
+			reply.NReduce = c.NReduce
+			reply.Filename = c.files[idx]
+			reply.TaskType = MapTask
+			c.mapTasks[idx].state = TaskInProgress
+			c.mapTasks[idx].startTime = time.Now()
+		} else {
+			reply.TaskType = WaitTask
+			reply.TaskNum = -1 // signal worker to wait
+		}
+	} else if !c.allReduceTasksDone() {
+		ResetTask(c.redTasks)
+		idx := GetPendingTask(c.redTasks)
+		if idx != -1 {
+			reply.TaskType = ReduceTask
+			reply.TaskNum = idx
+			reply.NReduce = c.NReduce
+			c.redTasks[idx].state = TaskInProgress
+			c.redTasks[idx].startTime = time.Now()
+		} else {
+			reply.TaskType = WaitTask
+			reply.TaskNum = -1 // signal worker to wait
+		}
 	} else {
 		reply.TaskType = NoTask
 		reply.TaskNum = -1 // all tasks completed
@@ -59,10 +100,10 @@ func (c *Coordinator) TaskDone(args *TaskDoneArgs, reply *TaskDoneReply) error {
 
 	if args.TaskType == MapTask {
 		// fmt.Printf("Map task %d done\n", args.TaskNum)
-		c.mapTasks[args.TaskNum] = true
+		c.mapTasks[args.TaskNum].state = TaskCompleted
 	} else if args.TaskType == ReduceTask {
 		// fmt.Printf("Reduce task %d done\n", args.TaskNum)
-		c.redTasks[args.TaskNum] = true
+		c.redTasks[args.TaskNum].state = TaskCompleted
 	}
 	return nil
 }
@@ -97,8 +138,8 @@ func (c *Coordinator) server() {
 
 // Check if all map tasks are completed
 func (c *Coordinator) allMapTasksDone() bool {
-	for _, done := range c.mapTasks {
-		if !done {
+	for _, task := range c.mapTasks {
+		if task.state != TaskCompleted {
 			return false
 		}
 	}
@@ -107,8 +148,8 @@ func (c *Coordinator) allMapTasksDone() bool {
 
 // Check if all reduce tasks are completed
 func (c *Coordinator) allReduceTasksDone() bool {
-	for _, done := range c.redTasks {
-		if !done {
+	for _, task := range c.redTasks {
+		if task.state != TaskCompleted {
 			return false
 		}
 	}
@@ -141,8 +182,8 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		NReduce:  nReduce,
 		midx:     0,
 		ridx:     0,
-		mapTasks: make([]bool, lenMapTasks),
-		redTasks: make([]bool, lenRedTasks),
+		mapTasks: make([]TaskInfo, lenMapTasks),
+		redTasks: make([]TaskInfo, lenRedTasks),
 		done:     false,
 	}
 

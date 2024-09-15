@@ -51,8 +51,8 @@ func Worker(mapf func(string, string) []KeyValue,
 	for {
 		args := GetTaskArgs{}
 		reply := GetTaskReply{}
-		call("Coordinator.GetTask", &args, &reply)
-		if reply.TaskType == NoTask {
+		connected := call("Coordinator.GetTask", &args, &reply)
+		if !connected || reply.TaskType == NoTask {
 			break
 		} else if reply.TaskType == WaitTask || reply.TaskNum == -1 {
 			// wait a while
